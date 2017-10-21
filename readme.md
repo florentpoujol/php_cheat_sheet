@@ -5,17 +5,78 @@ Also see [PHP The Right Way](http://www.phptherightway.com/)
 
 ## Performance
 
-### Session
+### Caches
+
+__OPCache__
+
+When a PHP file is read by PHP is it lexed, parsed, compiled and then executed. The three first steps take about 80% of the time and can be cached.  
+PHP7 brings by default the OPCache extension, that cache the userland's OPCode in shared memory.  
+[See the PHP Manual](https://secure.php.net/manual/en/opcache.configuration.php)
+
+__realpath cache__
+
+PHP automatically cache the file system calls (when using include, require, fopen...).  
+This is configured via the two ini directives `realpath_cache_size` and `realpath_cache_ttl`.
+Make sure the value if at least a few mega bytes.
+
+[Beware to empty it](https://engineering.facile.it/blog/eng/realpath-cache-is-it-all-php-opcache-s-fault/) if you update an application without changing its directory.
+
+__Object (DB) cache__
+
+Cache the result of the most intensives requests to the database.
+
+__Session__
 
 Set `session.save_handler` to something else than `files`. Use memory cache like Redis or Memcached instead of files (also good for security).
 
+__HTTP cache__
+
+Your template engine probably has a built-in cache.
+
+__Other caches__
+
+It is likely that your framework has several optimization routines, that involve caching configuration, routes, dependencies injection, etc...
 
 
+### Code
+
+There is no coding tricks that will make your code really faster.   
+
+Knowledge of the Zend engine can give us a few uses that are theoretically faster, but that have no practical impact in production and that are especially not worth changing your coding habits/standards for.
+
+Ie: 
+- Fully qualified function calls ([see slides 8 to 11](https://www.slideshare.net/jpauli/symfony-live-2017php7performances))
+- `++$i` instead of `$i++`. The preincrement take a single line of OPCode instead of 2, but [it is optimized but the compilator](https://youtu.be/wiP-gbl-vZA?t=29m3s) (when possible) and the perf difference is really super tiny.
+- Encapsed strings (surrounded by double quotes) must be parsed, but those surrounded by single quotes must not. However the parsing of encapsed string is optimized, especially when there are variables to replace inside it. So you should not prefer single quoted strings for performance reasons and you should prefer encapsed strings with variable inside instead of concatenation, but here again, the performance differences are tiny. [See slide 43 to 47](https://www.slideshare.net/jpauli/symfony-live-2017php7performances)
+
+References are rather slow. Also, specifically do not use them just so that a variable is not copied during a function call or a assignment to another variable because this is already what the engine does.  
+The Zend engine use a __copy on write__ system: It does not copy a value that you pass around "by value" until you actually try to modify it. ([See slide 18](https://www.slideshare.net/jpauli/symfony-live-2017php7performances)).
+
+Don't use regexes where you don't need them. Ie: prefer `str_replace()` instead of `preg_replace()`.
+
+Don't use the Suppression operator (`@`), it is quite slow and errors are actually your friends.
+
+Be conscious of how many times any piece of code will be called per request. Do not do unnecessary variable creation or function calls for instance inside loops if you can do it just before it.
+
+
+### Database
+
+[Prepared statements](https://secure.php.net/manual/en/pdo.prepare.php) can improved query time, when you run the same query several times per request, just with different parameters.
+
+
+### Misc
+
+Make sure the xDebug extension is not loaded, because its mere presence make the code significantly slower (same with Blackfire or other such analysis tool, that shouldn't be present in production anyway).
+
+Use the latest possible version of all technologies involved.
+
+Generally speaking, do not optimize anything useless you have proven that is is slow (or called a lot) in production (with all other optimizations in place). It is rather useless to optimize something that is almost never called because the result is always cached.
 
 
 ## Security
 
 [PHP Manual on security](https://secure.php.net/manual/en/security.php)
+
 
 ### Configuration
 
@@ -35,9 +96,6 @@ If possible, set `allow_url_fopen` to `off`, but it is frequently needed to have
 Set `expose_php` to `0` to not display the PHP version in request's headers. Make sure your web server doesn't do that on its own.
 
 
-
-
-
 ### User input
 
 Always thoroughly check received data.
@@ -55,10 +113,10 @@ Always explicitly process the expected data, not more, not less.
 Use the Filter extension for checks and/or sanitation, or regexes, or a full-fledge validation system.  
 Always do theses checks server-side, and at the last moment (to make sure the data is not modified between its check and its usage),
 
-When you receive text to be later displayed, ideally prevent it to be submitted at all with unwanted characters for instance, and/or use `strip_tags()` on it before saving it in databse.  
+When you receive text to be later displayed, ideally prevent it to be submitted at all with unwanted characters for instance, and/or use `strip_tags()` on it before saving it in database.  
 But always at least escape it with `htmlentities()` when been displayed.
 
-When the user should pass a path, be extra carefull to prevent the user accessing unwanted files: 
+When the user should pass a path, be extra careful to prevent the user accessing unwanted files: 
 - remove leading `/` so that the path is relative, 
 - remove in-between `../` to prevent going up in the hierarchy
 - and remove trailing null-bytes (`\0`) to make sure the path ends with something you specify.
@@ -80,17 +138,17 @@ Even when the input have been filtered, always query the DB with prepared statem
 If some user input are part of a shell command, be extra careful and use `escapeshellcmd()` and `escapeshellarg()`.
 
 
-
-
 ### Sessions and Cookies
 
+[See PHP manual](https://secure.php.net/manual/en/features.session.security.management.php)
+
 Do not thrust cookies.  
-Users can easilly alter their cookies or have them stolen.
+Users can easily alter their cookies or have them stolen.
 
 Do not store anything critical (ideally anything at all by the session id) in cookies, use sessions or a per-session server-side storage instead.
 If your need per-user cross-section storage, prefer the database to the cookie when possible, even for small data.
 
-Hashing or encryting the content of a cookie is usually useless, if the mere presence of the cookie on a user's computer is enough to produce side effect on the website (like authentication).
+Hashing or encrypting the content of a cookie is usually useless, if the mere presence of the cookie on a user's computer is enough to produce side effect on the website (like authentication).
 
 Do not make that the mere presence of the cookie allow someone to access critical content.
 
@@ -122,7 +180,8 @@ Do not use `md5` or `sha1` for hashing important data.
 
 Use `crypt()` or `hash()` for alternative hashing algorithms.
 
-For encryption, only use the `openSSL` or `libsodium` extentions, uninstall `mcrypt`. 
+For encryption, only use the `openSSL` or `libsodium` extensions, uninstall `mcrypt`. 
+
 
 ### Misc
 
@@ -142,7 +201,7 @@ Never display errors in production, but log them (and check and rotate the logs 
 ```
 display_errors = 0
 display_startup_errors = 0
-error_reporting = E_ALL ; or whatever combinaison you want
+error_reporting = E_ALL ; or whatever combination you want
 log_errors = /path/to/php_errors.log
 ```
 
@@ -167,6 +226,7 @@ Prefer using PDO instead of mysqli or other native drivers.
 ### CSRF
 
 Cross Site Request Forgery is when an attacker sends a request to a website _in the context_ of an authenticated user. The request is accepted by the site like if it was sent by that user, from a link or a form on that website.  
+
 The solution is to generate a cryptographically generated unique token, and link it to the user's session and to the request (in the URL for GET or as hidden field for POST).  
 For improved UX, have a system that allows a single user to have several tokens (so that it can perform other actions while having a form open, for instance).  
 Upon receiving a request, the site expects a token with the request and compare it with the token(s) stored in the user's session.  
@@ -178,13 +238,16 @@ Use POST (or other HTTP methods) to do everything else, it make an attackers lif
 
 ### XSS
 
-Typically when an attacker manage to execute malicious code (HTML, CSS or JS) on your website, typically by injecting it through a form and having it display on a page.
+Typically when an attacker manage to execute malicious code (HTML, CSS or JS) on your website, typically by injecting it through a form and having it display on a page.  
+
+Sanitize user input when it is submitted and escape it with (`htmlentities()` or `htmlspecialchars()`) before displaying it.
 
 
 ### SQL Injection
 
-When some SQL is injected by a malicious user into a request, in order to perform unwanted request.
-Use PDO's prepared statements.
+When some SQL is injected by a malicious user into a request, in order to perform unwanted request.  
+
+Use PDO's prepared statements (in addition to filtering user input).
 
 
 ### Session thief
@@ -199,4 +262,5 @@ If a user present the session id but the other infos don't match, destroy the se
 ### Session Fixation
 
 When an attacker manage to give a session id to it's victim. The idea is that it will wait for the user to authenticate with that session id.
-Effect is negated by either regenerating session ids when they are unknown (not generated by the server, or old session), or by creating an all-new session when a user authenticate (at least regenerate the id).
+
+Effect is negated by either regenerating session ids when they are unknown (not generated by the server, or old session), and by creating an all-new session when a user authenticate (at least regenerate the id).
